@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 # Хранилище для истории разговора (в памяти, для простоты)
 conversation_history: List[Dict[str, str]] = []
 
-# HTML шаблон с Puter.js (с изменениями для отображения только текущих сообщений)
+# HTML шаблон с Puter.js (без изменений)
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -142,9 +142,10 @@ async def chat_endpoint(request: Dict[str, str]):
             stream: True
         })
 
+        # Обрабатываем потоковый ответ
         full_response = ""
-        for await part in response:
-            full_response += part?.text || ""
+        async for part in response:
+            full_response += part.get("text", "")
 
         # Добавляем ответ ИИ в историю
         conversation_history.append({"role": "assistant", "content": full_response})
