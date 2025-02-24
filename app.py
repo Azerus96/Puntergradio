@@ -3,12 +3,16 @@ import os
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, FileResponse
 import logging
+from typing import List, Dict
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# HTML шаблон с Puter.js (без изменений)
+# Хранилище для истории разговора (в памяти, для простоты)
+conversation_history: List[Dict[str, str]] = []
+
+# HTML шаблон с Puter.js (с изменениями для отображения только текущих сообщений)
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -73,22 +77,20 @@ HTML_TEMPLATE = """
             input.value = '';
 
             try {
-                const response = await puter.ai.chat(message, {
-                    model: 'claude-3-5-sonnet',
-                    stream: true
+                // Отправляем сообщение на бэкенд через fetch
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ message: message })
                 });
 
-                let fullResponse = '';
-                for await (const part of response) {
-                    fullResponse += part?.text || '';
-                    // Обновляем последнее сообщение ассистента
-                    const lastAssistantMessage = chat.querySelector('.assistant:last-child');
-                    if (lastAssistantMessage) {
-                        lastAssistantMessage.textContent = fullResponse;
-                    } else {
-                        addMessage(fullResponse, false);
-                    }
-                    chat.scrollTop = chat.scrollHeight;
+                const data = await response.json();
+                if (data.error) {
+                    addMessage('Ошибка: ' + data.error, false);
+                } else {
+                    addMessage(data.response, false);
                 }
             } catch (error) {
                 addMessage('Ошибка: ' + error.message, false);
@@ -116,10 +118,43 @@ async def serve_chat():
 # Добавляем маршрут для favicon.ico (опционально)
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
-    # Если у вас есть файл favicon.ico, укажите путь к нему
-    # return FileResponse("path/to/favicon.ico")
-    # В противном случае возвращаем пустой ответ
     return {"message": "No favicon"}
+
+# Добавляем маршрут для обработки сообщений
+@app.post("/chat")
+async def chat_endpoint(request: Dict[str, str]):
+    global conversation_history
+    user_message = request.get("message")
+
+    if not user_message:
+        return {"error": "Сообщение не может быть пустым"}
+
+    try:
+        # Добавляем сообщение пользователя в историю
+        conversation_history.append({"role": "user", "content": user_message})
+
+        # Формируем полный контекст для ИИ (включая всю историю)
+        messages = conversation_history.copy()
+
+        # Отправляем запрос к ИИ с полной историей
+        response = await puter.ai.chat(messages, {
+            model: 'claude-3-5-sonnet',
+            stream: True
+        })
+
+        full_response = ""
+        for await part in response:
+            full_response += part?.text || ""
+
+        # Добавляем ответ ИИ в историю
+        conversation_history.append({"role": "assistant", "content": full_response})
+
+        # Возвращаем только последний ответ ИИ
+        return {"response": full_response}
+
+    except Exception as e:
+        logger.error(f"Ошибка при обработке сообщения: {str(e)}")
+        return {"error": str(e)}
 
 # Создаем Gradio интерфейс (оставляем для совместимости, но он не используется)
 with gr.Blocks() as demo:
