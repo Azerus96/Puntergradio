@@ -1,18 +1,12 @@
-import gradio as gr
-import os
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, FileResponse
 import logging
-from typing import List, Dict
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Хранилище для истории разговора (в памяти, для простоты)
-conversation_history: List[Dict[str, str]] = []
-
-# HTML шаблон с Puter.js (без изменений)
+# HTML шаблон с Puter.js на клиентской стороне
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -56,11 +50,29 @@ HTML_TEMPLATE = """
     <div id="chat" class="chat-container"></div>
     <input id="input" type="text" placeholder="Введите сообщение..." onkeypress="handleKeyPress(event)">
     <button onclick="sendMessage()">Отправить</button>
+    <button onclick="clearHistory()" style="margin-left: 10px;">Очистить историю</button>
 
     <script>
         const chat = document.getElementById('chat');
         const input = document.getElementById('input');
+        const MAX_HISTORY_LENGTH = 10;  // Ограничение длины истории
 
+        // Загружаем историю из localStorage при загрузке страницы
+        let conversationHistory = JSON.parse(localStorage.getItem('conversationHistory')) || [];
+
+        // Функция для сохранения истории в localStorage
+        function saveHistory() {
+            localStorage.setItem('conversationHistory', JSON.stringify(conversationHistory));
+        }
+
+        // Функция для очистки истории
+        function clearHistory() {
+            conversationHistory = [];
+            saveHistory();
+            chat.innerHTML = '';  // Очищаем чат на странице
+        }
+
+        // Функция для добавления сообщения в чат
         function addMessage(content, isUser) {
             const message = document.createElement('div');
             message.className = `message ${isUser ? 'user' : 'assistant'}`;
@@ -68,6 +80,11 @@ HTML_TEMPLATE = """
             chat.appendChild(message);
             chat.scrollTop = chat.scrollHeight;
         }
+
+        // Отображаем сохраненную историю при загрузке страницы
+        conversationHistory.forEach(msg => {
+            addMessage(msg.content, msg.role === 'user');
+        });
 
         async function sendMessage() {
             const message = input.value.trim();
@@ -77,21 +94,34 @@ HTML_TEMPLATE = """
             input.value = '';
 
             try {
-                // Отправляем сообщение на бэкенд через fetch
-                const response = await fetch('/chat', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ message: message })
+                // Добавляем сообщение пользователя в историю
+                conversationHistory.push({ role: 'user', content: message });
+                conversationHistory = conversationHistory.slice(-MAX_HISTORY_LENGTH);  // Ограничиваем длину истории
+                saveHistory();  // Сохраняем историю
+
+                // Вызываем Puter.js AI на клиентской стороне с потоковой передачей
+                const response = await puter.ai.chat(conversationHistory, {
+                    model: 'claude-3-5-sonnet',
+                    stream: true
                 });
 
-                const data = await response.json();
-                if (data.error) {
-                    addMessage('Ошибка: ' + data.error, false);
-                } else {
-                    addMessage(data.response, false);
+                let fullResponse = '';
+                for await (const part of response) {
+                    fullResponse += part?.text || '';
+                    // Обновляем сообщение по мере получения частей ответа
+                    const lastMessage = chat.querySelector('.message.assistant:last-child');
+                    if (lastMessage) {
+                        lastMessage.textContent = fullResponse;
+                    } else {
+                        addMessage(fullResponse, false);
+                    }
                 }
+
+                // Добавляем полный ответ ИИ в историю
+                conversationHistory.push({ role: 'assistant', content: fullResponse });
+                conversationHistory = conversationHistory.slice(-MAX_HISTORY_LENGTH);  // Ограничиваем длину истории
+                saveHistory();  // Сохраняем историю
+
             } catch (error) {
                 addMessage('Ошибка: ' + error.message, false);
             }
@@ -107,61 +137,16 @@ HTML_TEMPLATE = """
 </html>
 """
 
-# Создаем FastAPI приложение
 app = FastAPI()
 
-# Добавляем маршрут для корневого пути
 @app.get("/", response_class=HTMLResponse)
 async def serve_chat():
     return HTML_TEMPLATE
 
-# Добавляем маршрут для favicon.ico (опционально)
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     return {"message": "No favicon"}
 
-# Добавляем маршрут для обработки сообщений
-@app.post("/chat")
-async def chat_endpoint(request: Dict[str, str]):
-    global conversation_history
-    user_message = request.get("message")
-
-    if not user_message:
-        return {"error": "Сообщение не может быть пустым"}
-
-    try:
-        # Добавляем сообщение пользователя в историю
-        conversation_history.append({"role": "user", "content": user_message})
-
-        # Формируем полный контекст для ИИ (включая всю историю)
-        messages = conversation_history.copy()
-
-        # Отправляем запрос к ИИ с полной историей
-        response = await puter.ai.chat(messages, {
-            model: 'claude-3-5-sonnet',
-            stream: True
-        })
-
-        # Обрабатываем потоковый ответ
-        full_response = ""
-        async for part in response:
-            full_response += part.get("text", "")
-
-        # Добавляем ответ ИИ в историю
-        conversation_history.append({"role": "assistant", "content": full_response})
-
-        # Возвращаем только последний ответ ИИ
-        return {"response": full_response}
-
-    except Exception as e:
-        logger.error(f"Ошибка при обработке сообщения: {str(e)}")
-        return {"error": str(e)}
-
-# Создаем Gradio интерфейс (оставляем для совместимости, но он не используется)
-with gr.Blocks() as demo:
-    gr.HTML(lambda: HTML_TEMPLATE)
-
-# Запускаем приложение
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=7860)
