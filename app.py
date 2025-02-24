@@ -1,11 +1,14 @@
 import gradio as gr
+import os
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse, FileResponse
 import logging
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# HTML шаблон с Puter.js и кастомным JavaScript
+# HTML шаблон с Puter.js (без изменений)
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -102,10 +105,27 @@ HTML_TEMPLATE = """
 </html>
 """
 
-# Создаем Gradio интерфейс
+# Создаем FastAPI приложение
+app = FastAPI()
+
+# Добавляем маршрут для корневого пути
+@app.get("/", response_class=HTMLResponse)
+async def serve_chat():
+    return HTML_TEMPLATE
+
+# Добавляем маршрут для favicon.ico (опционально)
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    # Если у вас есть файл favicon.ico, укажите путь к нему
+    # return FileResponse("path/to/favicon.ico")
+    # В противном случае возвращаем пустой ответ
+    return {"message": "No favicon"}
+
+# Создаем Gradio интерфейс (оставляем для совместимости, но он не используется)
 with gr.Blocks() as demo:
-    gr.HTML(HTML_TEMPLATE)
+    gr.HTML(lambda: HTML_TEMPLATE)
 
 # Запускаем приложение
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=7860)
