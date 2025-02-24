@@ -1,14 +1,11 @@
 import gradio as gr
-import os
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
 import logging
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# HTML шаблон с Puter.js
+# HTML шаблон с Puter.js и кастомным JavaScript
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -105,18 +102,10 @@ HTML_TEMPLATE = """
 </html>
 """
 
-# Создаем FastAPI приложение
-app = FastAPI()
-
 # Создаем Gradio интерфейс
-def serve_chat():
-    return HTMLResponse(content=HTML_TEMPLATE)
-
-# Монтируем FastAPI приложение в Gradio
 with gr.Blocks() as demo:
-    gr.HTML(lambda: HTML_TEMPLATE)
+    gr.HTML(HTML_TEMPLATE)
 
 # Запускаем приложение
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=7860)
+    demo.launch(server_name="0.0.0.0", server_port=7860)
