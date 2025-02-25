@@ -1,7 +1,3 @@
-Вы правы, я допустил ошибку в форматировании. Вот все коды, аккуратно оформленные в отдельных блоках:
-
-### app.py
-```python
 import logging
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
